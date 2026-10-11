@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -152,7 +153,11 @@ def create_principal(tenant_id):
             flash("Principal name is required", "error")
             return redirect(request.url)
 
-        principal_id = f"prin_{uuid.uuid4().hex[:8]}"
+        supplied_id = request.form.get("principal_id")
+        principal_id = supplied_id.strip() if supplied_id is not None else f"prin_{uuid.uuid4().hex[:8]}"
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,50}", principal_id):
+            flash("Advertiser ID must contain 1 to 50 letters, numbers, underscores, or hyphens", "error")
+            return redirect(request.url)
 
         # Build platform mappings
         platform_mappings = {}
@@ -193,7 +198,11 @@ def create_principal(tenant_id):
 
             # The token is minted here and shown ONCE, in the flash below; the row keeps
             # its hash. An operator who loses it rotates it.
-            principal, token = PrincipalRepository(db_session, tenant_id).issue(
+            repository = PrincipalRepository(db_session, tenant_id)
+            if repository.get(principal_id) is not None:
+                flash("Advertiser ID is already in use", "error")
+                return redirect(request.url)
+            principal, token = repository.issue(
                 principal_id=principal_id,
                 name=principal_name,
                 platform_mappings=platform_mappings,  # JSONType handles serialization
