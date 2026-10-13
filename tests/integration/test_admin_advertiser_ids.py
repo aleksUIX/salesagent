@@ -23,10 +23,11 @@ def creation_env(integration_db, admin_client):
         yield env, admin_client, tenant
 
 
-def create(client, tenant_id, **fields):
+def create(client, tenant_id, *, script_name="", **fields):
     return client.post(
         f"/tenant/{tenant_id}/principals/create",
         data={"name": "Created Advertiser", "enable_mock": "1", **fields},
+        environ_overrides={"SCRIPT_NAME": script_name},
     )
 
 
@@ -47,22 +48,24 @@ def test_supplied_id_is_preserved(creation_env, principal_id):
 
 
 @pytest.mark.parametrize("principal_id", ["", "   ", "two words", "a/b", "☃", "a" * 51])
-def test_invalid_id_cannot_create_a_principal(creation_env, principal_id):
+@pytest.mark.parametrize("script_name", ["", "/console"])
+def test_invalid_id_cannot_create_a_principal(creation_env, principal_id, script_name):
     env, client, tenant = creation_env
-    response = create(client, tenant.tenant_id, principal_id=principal_id)
+    response = create(client, tenant.tenant_id, principal_id=principal_id, script_name=script_name)
     assert response.status_code == 302
-    assert response.headers["Location"].endswith(f"/tenant/{tenant.tenant_id}/principals/create")
+    assert response.headers["Location"] == f"{script_name}/tenant/{tenant.tenant_id}/principals/create"
     assert created_rows(env, tenant.tenant_id) == []
 
 
-def test_existing_id_does_not_change_or_duplicate_a_principal(creation_env):
+@pytest.mark.parametrize("script_name", ["", "/console"])
+def test_existing_id_does_not_change_or_duplicate_a_principal(creation_env, script_name):
     env, client, tenant = creation_env
     create(client, tenant.tenant_id, principal_id="buyer")
     (original,) = created_rows(env, tenant.tenant_id)
     original_hash = original.token_hash
-    response = create(client, tenant.tenant_id, principal_id="buyer", name="Replacement")
+    response = create(client, tenant.tenant_id, principal_id="buyer", name="Replacement", script_name=script_name)
     assert response.status_code == 302
-    assert response.headers["Location"].endswith(f"/tenant/{tenant.tenant_id}/principals/create")
+    assert response.headers["Location"] == f"{script_name}/tenant/{tenant.tenant_id}/principals/create"
     (row,) = created_rows(env, tenant.tenant_id)
     assert (row.principal_id, row.token_hash) == ("buyer", original_hash)
     assert env._session.scalar(select(Principal).filter_by(tenant_id=tenant.tenant_id, name="Replacement")) is None

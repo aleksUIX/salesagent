@@ -151,13 +151,13 @@ def create_principal(tenant_id):
         principal_name = request.form.get("name", "").strip()
         if not principal_name:
             flash("Principal name is required", "error")
-            return redirect(request.url)
+            return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
         supplied_id = request.form.get("principal_id")
         principal_id = supplied_id.strip() if supplied_id is not None else f"prin_{uuid.uuid4().hex[:8]}"
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,50}", principal_id):
             flash("Advertiser ID must contain 1 to 50 letters, numbers, underscores, or hyphens", "error")
-            return redirect(request.url)
+            return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
         # Build platform mappings
         platform_mappings = {}
@@ -174,7 +174,7 @@ def create_principal(tenant_id):
                     "Please select a valid advertiser from the dropdown.",
                     "error",
                 )
-                return redirect(request.url)
+                return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
             platform_mappings["google_ad_manager"] = {
                 "advertiser_id": gam_advertiser_id,
@@ -201,7 +201,7 @@ def create_principal(tenant_id):
             repository = PrincipalRepository(db_session, tenant_id)
             if repository.get(principal_id) is not None:
                 flash("Advertiser ID is already in use", "error")
-                return redirect(request.url)
+                return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
             principal, token = repository.issue(
                 principal_id=principal_id,
                 name=principal_name,
@@ -220,7 +220,7 @@ def create_principal(tenant_id):
     except Exception as e:
         logger.error(f"Error creating principal: {e}", exc_info=True)
         flash("Error creating advertiser", "error")
-        return redirect(request.url)
+        return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
 
 @principals_bp.route("/principals/<principal_id>/edit", methods=["GET", "POST"])
