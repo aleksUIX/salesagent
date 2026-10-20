@@ -188,7 +188,7 @@ def _mcp_wire_envelope(exc: Exception) -> dict | None:
         result = frame.get("result")
         if isinstance(error, dict):
             payload = error
-        elif isinstance(result, dict) and result.get("isError") is True:
+        elif isinstance(result, dict) and result.get("isError"):
             payload = result
         else:
             return None
@@ -493,16 +493,21 @@ def _mcp_error_to_exception(payload: dict[str, Any]) -> Exception:
 
     :func:`_mcp_wire_envelope` reads the two-layer envelope out of the JSON FastMCP
     puts in ``str(ToolError)``. Over HTTP that envelope arrives as the ``isError``
-    result's text content (or as a JSON-RPC ``error.message``), so it is re-wrapped in
-    a ``ToolError`` here and handed to the SAME reader the in-memory leg uses — one
-    parse, not two.
+    result's text content, or as a JSON-RPC ``error.data`` object. ``error.message``
+    is the SDK's own protocol string and is not an AdCP envelope. One reader for
+    the in-memory leg and the HTTP leg.
     """
+    import json
+
     from fastmcp.exceptions import ToolError
 
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return ToolError(json.dumps(data))
     for item in payload.get("content") or []:
         if isinstance(item, dict) and isinstance(item.get("text"), str):
             return ToolError(item["text"])
-    return ToolError(str(payload.get("message") or payload))
+    return ToolError("")
 
 
 class WireRefusal(AssertionError):

@@ -252,7 +252,8 @@ def _mcp_http_client(**kwargs: Any):
         if response.is_error and response.headers.get("content-type", "").startswith("application/json"):
             await response.aread()
 
-    # The SDK factory already follows redirects and supplies MCP timeouts.
+    # fastmcp calls create_mcp_http_client(headers, timeout, auth). Drop
+    # follow_redirects so this factory stays that call plus the body hook.
     kwargs.pop("follow_redirects", None)
     client = create_mcp_http_client(**kwargs)
     client.event_hooks["response"].append(_read_error_body)
@@ -307,9 +308,16 @@ def _deliver_e2e_mcp(
     except Exception as exc:
         # Preserve the received envelope and HTTP challenge through one reader.
         # Unrecognized bodies remain transport failures with no invented code.
-        wire_error = _mcp_wire_error(exc, getattr(exc, "response", None))
+        import httpx
+
+        from tests.harness._base import WireRefusal
+
+        response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+        wire_error = _mcp_wire_error(exc, response)
         if wire_error is not exc:
             raise wire_error from exc
+        if response is not None:
+            raise WireRefusal(str(exc), response) from exc
         raise
 
 
@@ -420,6 +428,10 @@ def _deliver_e2e_a2a(
     try:
         body = response.json()
     except ValueError:
+        if response.status_code >= 400:
+            from tests.harness._base import WireRefusal
+
+            raise WireRefusal(f"A2A HTTP {response.status_code} with no JSON body", response)
         response.raise_for_status()
         raise
 
@@ -432,8 +444,13 @@ def _deliver_e2e_a2a(
         # Carried through as bytes; nothing is rebuilt from it.
         envelope = _wire_envelope(error_data) if isinstance(error_data, dict) else None
         if envelope is not None:
-            raise WireError(envelope)
-        raise RuntimeError(f"A2A JSON-RPC error {rpc_error.get('code')}: {fallback_message}")
+            raise WireError(envelope, response)
+        from tests.harness._base import WireRefusal
+
+        raise WireRefusal(
+            f"A2A JSON-RPC error {rpc_error.get('code')}: {fallback_message}",
+            response,
+        )
 
     result = body.get("result") or {}
     task = result.get("task")
@@ -446,7 +463,7 @@ def _deliver_e2e_a2a(
         if artifacts:
             envelope = _wire_envelope(_artifact_data_from_json(artifacts[0]))
             if envelope is not None:
-                raise WireError(envelope)
+                raise WireError(envelope, response)
         raise RuntimeError(f"A2A task failed: {task.get('status')}")
 
     if state == "TASK_STATE_SUBMITTED":
@@ -762,7 +779,11 @@ def _dispatch_core(
         # *transport* is forwarded so the error envelope carries the same
         # transport.value tag and derived status the dispatcher path produces —
         # one error-unwrap implementation per transport family, not two.
-        return UNWRAP_ERROR[transport](exc, transport)
+        # The HTTP response rides the carrier (WireError or WireRefusal), and
+        # one helper re-attaches it for MCP and A2A.
+        from tests.harness.dispatchers import _carrying_refusal_response
+
+        return _carrying_refusal_response(UNWRAP_ERROR[transport](exc, transport), exc)
     return UNWRAP_SUCCESS[transport](env, raw, transport, tool_name)
 
 
@@ -839,7 +860,8 @@ def unwrap_mcp_error(exc: Exception, transport: Transport = Transport.MCP) -> Tr
         # rather than a fault that produced no envelope at all.
         envelope={"transport": transport.value, "status": derive_error_status(wire)},
         wire_error_envelope=wire,
-        raw_response=getattr(exc, "response", None),
+        # The refusal's HTTP response is re-attached by _refusal_response on the
+        # shared dispatch error path. This unwrap does not duck-type exc.response.
         # NO synthesized envelope. MCP HAS a wire, so a rebuilt copy here is
         # either redundant or — when the capture above came back None — a mask
         # that would let error_envelope() hand a downstream test a value

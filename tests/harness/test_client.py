@@ -502,7 +502,7 @@ class TestClientE2eMcpHttpRefusals:
         if container == "result":
             payload = {"isError": True, "content": [{"type": "text", "text": json.dumps(envelope)}]}
         else:
-            payload = {"code": -32603, "message": json.dumps(envelope)}
+            payload = {"code": -32603, "message": "x", "data": envelope}
         result = self._dispatch(monkeypatch, {"jsonrpc": "2.0", "id": 2, container: payload})
 
         result.assert_wire_error("AUTH_MISSING", recovery="correctable")
@@ -556,8 +556,14 @@ class TestClientE2eMcpHttpRefusals:
             assert frame["method"] == "tools/call"
             headers = {"content-type": "application/json", "www-authenticate": "Bearer"}
             if isinstance(refusal, bytes):
-                return httpx.Response(401, content=refusal, headers=headers)
-            return httpx.Response(401, json={**refusal, "id": frame["id"]}, headers=headers)
+                payload_bytes = refusal
+            else:
+                payload_bytes = json.dumps({**refusal, "id": frame["id"]}).encode()
+
+            async def _body(data: bytes):
+                yield data
+
+            return httpx.Response(401, content=_body(payload_bytes), headers=headers)
 
         real_client = httpx.AsyncClient
 
