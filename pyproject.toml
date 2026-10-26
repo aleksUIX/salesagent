@@ -140,10 +140,10 @@ dev = [
     # Floor is the pre-push stage requirement (docs/development/ci-pipeline.md).
     "pre-commit>=3.2.0",
     # Transitive, via pre-commit, which sets no upper bound. GHSA-5vjq-rrrf-7h2q,
-    # GHSA-vxj4-q4g9-crj7 and GHSA-c978-59m8-c77v name 21.14.4, 21.14.7 and 21.14.9 as
-    # fixes, so the floor is the highest of them (earlier PYSEC-2026-4011..4014). Dev-only,
-    # but audited, because `uv export` includes the dev group.
-    "virtualenv>=21.14.9",
+    # GHSA-vxj4-q4g9-crj7, GHSA-c978-59m8-c77v and GHSA-cx6f-vjhg-g3cc name 21.14.4,
+    # 21.14.7, 21.14.9 and 21.14.13 as fixes, so the floor is the highest of them (earlier
+    # PYSEC-2026-4011..4014). Dev-only, but audited, because `uv export` includes the dev group.
+    "virtualenv>=21.14.13",
 ]
 
 [tool.ruff]
