@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
     "a2wsgi>=1.10.0",
     "adcp==6.6.0",  # exact pin — 6.6.0 (latest stable); bump WIP, see docs/adcp-spec-version.md
-    "fastmcp>=3.2.0,<3.3.0", # 3.3.0 split fastmcp-slim[server] from the monolith (breaking Context/Middleware imports); stay on 3.2.x
+    "fastmcp>=3.4.10,<3.5", # GHSA-7xgj-8392-5q4r (no 3.2.x fix); minor-capped because 3.3.0 broke Context/Middleware imports between minors
     "mcp>=1.30.0", # CVE-2026-59951 / GHSA-84m7-p3x7-pcfv; earlier CVE-2026-59950 / GHSA-vj7q-gjh5-988w
     "google-cloud-iam>=2.19.1",
     "rich>=13.7.1",
@@ -54,7 +54,8 @@ dependencies = [
     # Security patches for transitive dependencies
     "mcp>=1.30.0",  # CVE-2026-59951 / GHSA-84m7-p3x7-pcfv (via fastmcp); earlier CVE-2026-59950
     "pyjwt>=2.15.0",  # GHSA-42vr-xj54-vc7v (fixed in 2.15.0) + 11 more fixed in 2.14.0, GHSA-w6j9-cwv2-h6wq et al.; earlier GHSA-752w-5fwx-jx9f
-    "filelock>=3.20.3",  # GHSA-qmgc-5h2g-mvrw
+    "filelock>=4.2.1",  # GHSA-v4x8-3wr5-3wq8, GHSA-9vhv-jxww-xfm5, GHSA-567q-5qvw-pf92; earlier GHSA-qmgc-5h2g-mvrw
+    "opentelemetry-api>=1.45.1",  # GHSA-xcq7-p3pf-p88h (moves logfire to 5.x and the opentelemetry family with it)
     "urllib3>=2.8.0",  # GHSA-8988-9cw3-xx77 + GHSA-gh4c-6fx4-qh6g + GHSA-vxq7-64xx-v4gw; earlier GHSA-38jv-5279-wg99 + GHSA-qccp-gfcp-xxvc + GHSA-mf9v-mfxr-j63j
     "werkzeug>=3.1.9",  # GHSA-g6x2-hccm-hh4m; earlier GHSA-87hc-h4r5-73f7 + GHSA-29vq-49wr-vm6x
     "jaraco-context>=6.1.0",  # GHSA-58pv-8j8x-9vj2
@@ -127,7 +128,7 @@ dev = [
     "semgrep>=1.50.0",
     "pylint>=4.0.5",
     # Security patches for transitive dev dependencies
-    "black>=26.3.1",  # GHSA-3936-cmfr-pm3m
+    "black>=26.10.1",  # GHSA-cg8m-r9f2-5wm2; earlier GHSA-3936-cmfr-pm3m
     "types-python-dateutil>=2.9.0.20260408",
     # Added in PR 2 of issue #1234: randomly for test order randomisation to
     # surface order-dependent failures. xdist floor kept at >=3.5.0 (union of
