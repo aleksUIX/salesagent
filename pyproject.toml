@@ -18,7 +18,7 @@ dependencies = [
     "flask>=3.1.3",
     "flask-caching>=2.3.0", # Response caching for improved performance
     "psycopg2-binary>=2.9.9",
-    "authlib>=1.6.12",  # GHSA-jj8c-mmj3-mmgv; PYSEC-2026-188
+    "authlib>=1.9.1",  # GHSA-8m4g-j4wp-wgcg (fixed in 1.9.1), GHSA-6v38-4h7w-rj9h + GHSA-fch4-3c6x-j4gc + GHSA-7vr2-2fgp-9w7p + GHSA-c5mf-xmp2-59rc + GHSA-x4rv-c3wx-4cr8 (1.9.0), GHSA-jj7h-c3hg-m23x (1.8.0); earlier GHSA-jj8c-mmj3-mmgv; PYSEC-2026-188
     "requests-oauthlib>=1.3.1",
     "oauthlib>=4.0.0",  # GHSA-xpv3-w29h-x7cv / PYSEC-2026-4114; transitive via requests-oauthlib
     "fastapi>=0.133.0",  # 0.133.0 adds starlette 1.0+ support (PYSEC-2026-161)
@@ -67,6 +67,7 @@ dependencies = [
     "click>=8.3.3",  # PYSEC-2026-2132 (transitive via flask/uvicorn)
     "fsspec>=2026.6.0",  # GHSA-27vj-qcqg-25rc (transitive via huggingface-hub, from the cohere extra)
     "certifi>=2026.10.19",  # GHSA-6q48-6c7w-9gw2 / PYSEC-2026-4320 (transitive via httpx/httpcore/requests)
+    "dnspython>=2.9.0",  # GHSA-45c3-73f7-pv4m (transitive via email-validator, from adcp and pydantic[email])
     # Transitive via pydantic-ai-slim -> genai-prices. 2.3.0 carries four advisories:
     # httpcore2 GHSA-7mj9-2mp8-4m2p, httpx2 GHSA-h4x7-gw46-3wm6 / GHSA-pf96-p4fj-6566 /
     # GHSA-8xx6-hgc6-gc2m. Floors are the highest fix version each names, so uv-secure
@@ -126,7 +127,7 @@ dev = [
     "pytest-bdd>=7.0.0",
     "pytest-xdist>=3.5.0",  # bdd suite runs `pytest -n auto --dist loadfile`
     "semgrep>=1.50.0",
-    "pylint>=4.0.5",
+    "pylint>=4.0.9",  # GHSA-22qq-2fwx-7p67
     # Security patches for transitive dev dependencies
     "black>=26.10.1",  # GHSA-cg8m-r9f2-5wm2; earlier GHSA-3936-cmfr-pm3m
     "types-python-dateutil>=2.9.0.20260408",
