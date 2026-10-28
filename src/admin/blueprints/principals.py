@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from src.admin.services import DashboardService
 from src.admin.utils import require_tenant_access
 from src.admin.utils.audit_decorator import log_admin_action, record_admin_action_failure
+from src.admin.utils.operator_errors import safe_error_message
 from src.core.database.database_session import get_db_session
 from src.core.database.integrity import resolve_or_write
 from src.core.database.models import MediaBuy, PushNotificationConfig, Tenant
@@ -121,10 +122,15 @@ def list_principals(tenant_id):
         return redirect(url_for("core.index"))
 
 
+#: Prefix of the mock adapter's advertiser ID for a principal.
+_MOCK_ADVERTISER_PREFIX = "mock_"
+
 #: The advertiser ID rule. The create form renders it as its ``pattern`` so the browser and
 #: the server cannot disagree; ``\-`` keeps it valid under the ``v`` flag browsers compile
-#: ``pattern`` with. 50 is the narrowest column that stores a principal ID.
-ADVERTISER_ID_MAX_LENGTH = 50
+#: ``pattern`` with. The length leaves room for the mock prefix: the mock adapter records
+#: its advertiser ID in ``audit_logs.adapter_id``, VARCHAR(50), the narrowest column a
+#: value derived from the ID reaches.
+ADVERTISER_ID_MAX_LENGTH = 50 - len(_MOCK_ADVERTISER_PREFIX)
 ADVERTISER_ID_PATTERN = rf"[a-zA-Z0-9_\-]{{1,{ADVERTISER_ID_MAX_LENGTH}}}"
 
 #: Literals audit rows carry in ``principal_id`` when the actor is not an advertiser:
@@ -237,7 +243,7 @@ def create_principal(tenant_id):
         # Mock adapter mapping (for testing)
         if request.form.get("enable_mock"):
             platform_mappings["mock"] = {
-                "advertiser_id": f"mock_{principal_id}",
+                "advertiser_id": f"{_MOCK_ADVERTISER_PREFIX}{principal_id}",
                 "enabled": True,
             }
 
@@ -272,7 +278,7 @@ def create_principal(tenant_id):
 
     except Exception as e:
         logger.error(f"Error creating principal: {e}", exc_info=True)
-        return _refuse_create(tenant_id, "Error creating advertiser", e)
+        return _refuse_create(tenant_id, "Error creating advertiser", safe_error_message(e))
 
 
 @principals_bp.route("/principals/<principal_id>/edit", methods=["GET", "POST"])
@@ -649,7 +655,10 @@ def save_testing_config(tenant_id, principal_id):
 
             # Ensure mock adapter exists
             if "mock" not in platform_mappings:
-                platform_mappings["mock"] = {"advertiser_id": f"mock_{principal_id}", "enabled": True}
+                platform_mappings["mock"] = {
+                    "advertiser_id": f"{_MOCK_ADVERTISER_PREFIX}{principal_id}",
+                    "enabled": True,
+                }
 
             # Update hitl_config
             platform_mappings["mock"]["hitl_config"] = hitl_config
