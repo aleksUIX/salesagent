@@ -4,12 +4,18 @@ The contract is templates/create_principal.html. These are real Flask and
 PostgreSQL tests because the protocol BDD harness does not drive admin forms.
 """
 
+import re
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import select
 
-from src.core.database.models import Principal
-from tests.factories import TenantFactory
+from src.admin.blueprints import principals as principals_blueprint
+from src.core.database.models import AuditLog, Principal
+from src.core.database.repositories.principal import PrincipalRepository
+from tests.factories import PrincipalFactory, TenantFactory
 from tests.harness._base import BareIntegrationEnv
+from tests.helpers import concurrent_commit_in_write_window, operator_answer
 from tests.helpers.admin_session import admin_auth_session
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
@@ -36,7 +42,15 @@ def created_rows(env, tenant_id):
     return env._session.scalars(select(Principal).filter_by(tenant_id=tenant_id, name="Created Advertiser")).all()
 
 
-@pytest.mark.parametrize("principal_id", ["Buyer_123-brand", "a" * 50])
+def audited_outcomes(env, tenant_id):
+    session = env.get_session()
+    session.expire_all()
+    return session.scalars(
+        select(AuditLog.success).filter_by(tenant_id=tenant_id, operation="AdminUI.create_principal")
+    ).all()
+
+
+@pytest.mark.parametrize("principal_id", ["Buyer_123-brand", "a" * 50, "Anonymous"])
 def test_supplied_id_is_preserved(creation_env, principal_id):
     env, client, tenant = creation_env
     response = create(client, tenant.tenant_id, principal_id=principal_id)
@@ -52,9 +66,20 @@ def test_supplied_id_is_preserved(creation_env, principal_id):
 def test_invalid_id_cannot_create_a_principal(creation_env, principal_id, script_name):
     env, client, tenant = creation_env
     response = create(client, tenant.tenant_id, principal_id=principal_id, script_name=script_name)
-    assert response.status_code == 302
-    assert response.headers["Location"] == f"{script_name}/tenant/{tenant.tenant_id}/principals/create"
+    assert operator_answer(client, response) == (
+        302,
+        f"{script_name}/tenant/{tenant.tenant_id}/principals/create",
+        [("error", "Advertiser ID must contain 1 to 50 letters, numbers, underscores, or hyphens")],
+    )
     assert created_rows(env, tenant.tenant_id) == []
+
+
+def test_create_form_enforces_the_server_rule(creation_env):
+    _, client, tenant = creation_env
+    page = client.get(f"/tenant/{tenant.tenant_id}/principals/create").get_data(as_text=True)
+    (field,) = re.findall(r'<input[^>]*\bid="principal_id"[^>]*>', page)
+    assert 'maxlength="50"' in field
+    assert r'pattern="[a-zA-Z0-9_\-]{1,50}"' in field
 
 
 @pytest.mark.parametrize("script_name", ["", "/console"])
@@ -69,6 +94,52 @@ def test_existing_id_does_not_change_or_duplicate_a_principal(creation_env, scri
     (row,) = created_rows(env, tenant.tenant_id)
     assert (row.principal_id, row.token_hash) == ("buyer", original_hash)
     assert env._session.scalar(select(Principal).filter_by(tenant_id=tenant.tenant_id, name="Replacement")) is None
+
+
+def test_race_loser_gets_the_precheck_answer(creation_env):
+    _, client, tenant = creation_env
+    with concurrent_commit_in_write_window(
+        principals_blueprint, lambda: PrincipalFactory(tenant=tenant, principal_id="buyer")
+    ):
+        loser = operator_answer(client, create(client, tenant.tenant_id, principal_id="buyer"))
+    winner = operator_answer(client, create(client, tenant.tenant_id, principal_id="buyer"))
+    assert winner[2] == [("error", "Advertiser ID is already in use")]
+    assert loser == winner
+
+
+@pytest.mark.parametrize("principal_id", ["anonymous", "unknown", "admin"])
+def test_audit_placeholder_ids_are_reserved(creation_env, principal_id):
+    env, client, tenant = creation_env
+    answer = operator_answer(client, create(client, tenant.tenant_id, principal_id=principal_id))
+    assert answer[2] == [("error", f"Advertiser ID '{principal_id}' is reserved")]
+    assert created_rows(env, tenant.tenant_id) == []
+
+
+REFUSALS = {
+    "taken id": {"principal_id": "buyer"},
+    "invalid id": {"principal_id": "two words"},
+    "reserved id": {"principal_id": "anonymous"},
+    "missing name": {"name": ""},
+    "non-numeric gam advertiser": {"gam_advertiser_id": "abc"},
+}
+
+
+@pytest.mark.parametrize("fields", REFUSALS.values(), ids=REFUSALS)
+def test_refused_create_is_audited_as_failure(creation_env, fields):
+    env, client, tenant = creation_env
+    PrincipalFactory(tenant=tenant, principal_id="buyer")
+    env.get_session()
+    create(client, tenant.tenant_id, **{"principal_id": "new_buyer", **fields})
+    assert audited_outcomes(env, tenant.tenant_id) == [False]
+
+
+def test_unexpected_error_is_audited_as_failure(creation_env):
+    env, client, tenant = creation_env
+    with patch.object(PrincipalRepository, "issue", side_effect=RuntimeError("issue failed")):
+        answer = operator_answer(client, create(client, tenant.tenant_id, principal_id="buyer"))
+    assert answer[2] == [("error", "Error creating advertiser")]
+    assert audited_outcomes(env, tenant.tenant_id) == [False]
+    assert created_rows(env, tenant.tenant_id) == []
 
 
 def test_same_id_is_available_in_another_tenant(creation_env):

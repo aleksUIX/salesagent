@@ -121,11 +121,33 @@ def list_principals(tenant_id):
         return redirect(url_for("core.index"))
 
 
-#: Literals audit rows carry in ``principal_id`` for unauthenticated or unattributed calls
-#: (products.py, activity_helpers.py, tool_error_logging.py, task_management.py). The
-#: dashboard names the actor by looking the id up among the tenant's advertisers, so an
-#: advertiser holding one would inherit that activity.
-_AUDIT_SENTINEL_IDS = frozenset({"anonymous", "unknown"})
+#: The advertiser ID rule. The create form renders it as its ``pattern`` so the browser and
+#: the server cannot disagree; ``\-`` keeps it valid under the ``v`` flag browsers compile
+#: ``pattern`` with. 50 is the narrowest column that stores a principal ID.
+ADVERTISER_ID_MAX_LENGTH = 50
+ADVERTISER_ID_PATTERN = rf"[a-zA-Z0-9_\-]{{1,{ADVERTISER_ID_MAX_LENGTH}}}"
+
+#: Literals audit rows carry in ``principal_id`` when the actor is not an advertiser:
+#: unauthenticated calls, and creative reviews from the admin UI. The dashboard names the
+#: actor by looking the id up among the tenant's advertisers, so an advertiser holding one
+#: would inherit that activity.
+_AUDIT_SENTINEL_IDS = frozenset({"anonymous", "unknown", "admin"})
+
+
+def _advertiser_id_refusal(principal_id: str) -> str | None:
+    """Why ``principal_id`` cannot name a new advertiser, or ``None`` when it can."""
+    if not re.fullmatch(ADVERTISER_ID_PATTERN, principal_id):
+        return f"Advertiser ID must contain 1 to {ADVERTISER_ID_MAX_LENGTH} letters, numbers, underscores, or hyphens"
+    if principal_id in _AUDIT_SENTINEL_IDS:
+        return f"Advertiser ID '{principal_id}' is reserved"
+    return None
+
+
+def _refuse_create(tenant_id: str, message: str, reason: object = None):
+    """Flash ``message``, record the create as failed, and send the operator back to the form."""
+    record_admin_action_failure(message if reason is None else reason)
+    flash(message, "error")
+    return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
 
 def _issue_unless_taken(db_session, tenant_id: str, principal_id: str, **fields):
@@ -138,9 +160,7 @@ def _issue_unless_taken(db_session, tenant_id: str, principal_id: str, **fields)
     def already_in_use():
         if repository.get(principal_id) is None:
             return None
-        record_admin_action_failure("advertiser ID already in use")
-        flash("Advertiser ID is already in use", "error")
-        return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
+        return _refuse_create(tenant_id, "Advertiser ID is already in use")
 
     issued: list[str] = []
     refusal = resolve_or_write(
@@ -176,21 +196,21 @@ def create_principal(tenant_id):
                 tenant_id=tenant_id,
                 tenant_name=tenant.name,
                 has_gam=has_gam,
+                advertiser_id_pattern=ADVERTISER_ID_PATTERN,
+                advertiser_id_max_length=ADVERTISER_ID_MAX_LENGTH,
             )
 
     # POST - Create the principal
     try:
         principal_name = request.form.get("name", "").strip()
         if not principal_name:
-            flash("Principal name is required", "error")
-            return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
+            return _refuse_create(tenant_id, "Principal name is required")
 
         supplied_id = request.form.get("principal_id")
         principal_id = supplied_id.strip() if supplied_id is not None else f"prin_{uuid.uuid4().hex[:8]}"
-        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,50}", principal_id) or principal_id.lower() in _AUDIT_SENTINEL_IDS:
-            record_admin_action_failure("invalid advertiser ID")
-            flash("Advertiser ID must contain 1 to 50 letters, numbers, underscores, or hyphens", "error")
-            return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
+        id_refusal = _advertiser_id_refusal(principal_id)
+        if id_refusal is not None:
+            return _refuse_create(tenant_id, id_refusal)
 
         # Build platform mappings
         platform_mappings = {}
@@ -202,12 +222,12 @@ def create_principal(tenant_id):
             try:
                 int(gam_advertiser_id)
             except (ValueError, TypeError):
-                flash(
+                return _refuse_create(
+                    tenant_id,
                     f"GAM Advertiser ID must be numeric (got: '{gam_advertiser_id}'). "
                     "Please select a valid advertiser from the dropdown.",
-                    "error",
+                    "GAM advertiser ID not numeric",
                 )
-                return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
 
             platform_mappings["google_ad_manager"] = {
                 "advertiser_id": gam_advertiser_id,
@@ -252,8 +272,7 @@ def create_principal(tenant_id):
 
     except Exception as e:
         logger.error(f"Error creating principal: {e}", exc_info=True)
-        flash("Error creating advertiser", "error")
-        return redirect(url_for("principals.create_principal", tenant_id=tenant_id))
+        return _refuse_create(tenant_id, "Error creating advertiser", e)
 
 
 @principals_bp.route("/principals/<principal_id>/edit", methods=["GET", "POST"])
